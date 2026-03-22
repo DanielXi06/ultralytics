@@ -49,4 +49,5 @@ head:
   - [[-1, 10], 1, Concat, [1]] # cat head P5
   - [-1, 1, C3k2, [1024, True, 0.5, True]] # 22 (P5/32-large)
 
+  # Downstream task-specific auxiliary decoders can branch from P3/P4/P5 features here before the final Detect layer.
   - [[16, 19, 22], 1, Detect, [nc]] # Detect(P3, P4, P5)
