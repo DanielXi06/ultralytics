@@ -469,6 +469,38 @@ class v8DetectionLoss:
         return loss * batch_size, loss_detach
 
 
+class v8DetectSemAuxLoss(v8DetectionLoss):
+    """Detection loss with an auxiliary semantic segmentation term."""
+
+    def __init__(self, model, tal_topk: int = 10, tal_topk2: int | None = None):
+        """Initialize detection + auxiliary semantic loss for cardiac-style multi-task heads."""
+        super().__init__(model, tal_topk, tal_topk2)
+        self.sem_nc = getattr(model.model[-1], "sem_nc", self.nc)
+        self.sem_loss_weight = getattr(model.args, "sem_loss_weight", None)
+        if self.sem_loss_weight is None:
+            self.sem_loss_weight = model.yaml.get("sem_loss_weight", 0.2) if hasattr(model, "yaml") else 0.2
+        self.bcedice_loss = BCEDiceLoss(weight_bce=0.5, weight_dice=0.5)
+
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate combined detection and auxiliary semantic losses."""
+        det_loss, det_loss_items = super().loss(preds, batch)
+        sem_loss = torch.zeros(1, device=self.device)
+        sem_logits = preds.get("sem_logits")
+        sem_masks = batch.get("sem_masks")
+
+        if sem_logits is not None and sem_masks is not None:
+            if sem_masks.ndim == 4 and sem_masks.shape[1] == 1:
+                sem_masks = sem_masks.squeeze(1)
+            sem_masks = sem_masks.to(self.device).long().clamp_(0, self.sem_nc - 1)
+            sem_one_hot = F.one_hot(sem_masks, num_classes=self.sem_nc).permute(0, 3, 1, 2).float()
+            sem_loss = self.bcedice_loss(sem_logits, sem_one_hot).unsqueeze(0) * float(self.sem_loss_weight)
+
+        batch_size = preds["boxes"].shape[0]
+        total_loss = det_loss + sem_loss * batch_size
+        loss_items = torch.cat((det_loss_items, sem_loss.detach()))
+        return total_loss, loss_items
+
+
 class v8SegmentationLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 segmentation."""
 

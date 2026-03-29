@@ -80,6 +80,7 @@ from ultralytics.utils.loss import (
     E2ELoss,
     PoseLoss26,
     v8ClassificationLoss,
+    v8DetectSemAuxLoss,
     v8DetectionLoss,
     v8OBBLoss,
     v8PoseLoss,
@@ -512,6 +513,8 @@ class DetectionModel(BaseModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the DetectionModel."""
+        if isinstance(self.model[-1], DetectSemAux26):
+            return E2ELoss(self, v8DetectSemAuxLoss) if getattr(self, "end2end", False) else v8DetectSemAuxLoss(self)
         return E2ELoss(self) if getattr(self, "end2end", False) else v8DetectionLoss(self)
 
 
