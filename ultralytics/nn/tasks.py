@@ -44,6 +44,7 @@ from ultralytics.nn.modules import (
     Conv,
     Conv2,
     ConvTranspose,
+    DetectSemAux26,
     Detect,
     DWConv,
     DWConvTranspose2d,
@@ -79,6 +80,7 @@ from ultralytics.utils.loss import (
     E2ELoss,
     PoseLoss26,
     v8ClassificationLoss,
+    v8DetectSemAuxLoss,
     v8DetectionLoss,
     v8OBBLoss,
     v8PoseLoss,
@@ -511,6 +513,8 @@ class DetectionModel(BaseModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the DetectionModel."""
+        if isinstance(self.model[-1], DetectSemAux26):
+            return E2ELoss(self, v8DetectSemAuxLoss) if getattr(self, "end2end", False) else v8DetectSemAuxLoss(self)
         return E2ELoss(self) if getattr(self, "end2end", False) else v8DetectionLoss(self)
 
 
@@ -1681,6 +1685,7 @@ def parse_model(d, ch, verbose=True):
         elif m in frozenset(
             {
                 Detect,
+                DetectSemAux26,
                 WorldDetect,
                 YOLOEDetect,
                 Segment,
@@ -1696,7 +1701,19 @@ def parse_model(d, ch, verbose=True):
             args.extend([reg_max, end2end, [ch[x] for x in f]])
             if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
+            if m in {
+                Detect,
+                DetectSemAux26,
+                YOLOEDetect,
+                Segment,
+                Segment26,
+                YOLOESegment,
+                YOLOESegment26,
+                Pose,
+                Pose26,
+                OBB,
+                OBB26,
+            }:
                 m.legacy = legacy
         elif m is v10Detect:
             args.append([ch[x] for x in f])
