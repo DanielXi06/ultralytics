@@ -219,3 +219,52 @@ yolo help
 ```
 
 如果你愿意，我下一步可以按你当前服务器实际情况（Conda/venv、仓库路径、分支名）给你生成一份**一键可执行的定制命令清单**。
+
+---
+
+## 11) 为什么 GitHub 会提示 `This branch has conflicts that must be resolved`
+
+这表示：你当前 PR 分支和目标分支（通常是上游仓库 `main`）改到了**同一个文件的相同或相邻位置**，Git 无法自动决定保留哪一边，所以需要你手动合并。
+
+常见原因：
+
+1. 你开 PR 之后，上游 `main` 又有了新提交；
+2. 你和上游都改了同一份文档/同一段代码；
+3. 你在自己的多个分支之间反复 cherry-pick / rebase，导致历史交叉。
+
+### 解决方式（命令行，推荐）
+
+```bash
+# 0) 进入你的 fork 仓库并切到 PR 分支
+cd ~/projects/ultralytics
+git checkout <你的PR分支>
+
+# 1) 添加上游仓库（只需一次；已添加可跳过）
+git remote add upstream https://github.com/ultralytics/ultralytics.git
+
+# 2) 拉取上游最新代码
+git fetch upstream
+
+# 3) 把上游 main 合并到你的分支（新手推荐 merge，简单直观）
+git merge upstream/main
+```
+
+如果出现冲突，打开冲突文件，会看到这种标记：
+
+```text
+<<<<<<< HEAD
+你的改动
+=======
+上游改动
+>>>>>>> upstream/main
+```
+
+手动整理成你最终想保留的内容后，继续：
+
+```bash
+git add <冲突文件1> <冲突文件2>
+git commit -m "resolve merge conflicts with upstream main"
+git push origin <你的PR分支>
+```
+
+推送后，GitHub PR 页面通常会自动变成可合并状态。
