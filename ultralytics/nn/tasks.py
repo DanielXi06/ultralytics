@@ -45,6 +45,7 @@ from ultralytics.nn.modules import (
     Conv2,
     ConvTranspose,
     Detect,
+    DetectSemAux26,
     DWConv,
     DWConvTranspose2d,
     Focus,
@@ -1681,6 +1682,7 @@ def parse_model(d, ch, verbose=True):
         elif m in frozenset(
             {
                 Detect,
+                DetectSemAux26,
                 WorldDetect,
                 YOLOEDetect,
                 Segment,
@@ -1694,9 +1696,21 @@ def parse_model(d, ch, verbose=True):
             }
         ):
             args.extend([reg_max, end2end, [ch[x] for x in f]])
-            if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
+            if m in {Segment, DetectSemAux26, YOLOESegment, Segment26, YOLOESegment26}:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
+            if m in {
+                Detect,
+                DetectSemAux26,
+                YOLOEDetect,
+                Segment,
+                Segment26,
+                YOLOESegment,
+                YOLOESegment26,
+                Pose,
+                Pose26,
+                OBB,
+                OBB26,
+            }:
                 m.legacy = legacy
         elif m is v10Detect:
             args.append([ch[x] for x in f])
@@ -1784,6 +1798,8 @@ def guess_model_task(model):
         m = cfg["head"][-1][-2].lower()  # output module name
         if m in {"classify", "classifier", "cls", "fc"}:
             return "classify"
+        if m == "detectsemaux26":
+            return "segment"
         if "detect" in m:
             return "detect"
         if "segment" in m:
@@ -1806,7 +1822,7 @@ def guess_model_task(model):
             with contextlib.suppress(Exception):
                 return cfg2task(eval(x))  # nosec B307: safe eval of known attribute paths
         for m in model.modules():
-            if isinstance(m, (Segment, YOLOESegment)):
+            if isinstance(m, (Segment, DetectSemAux26, YOLOESegment)):
                 return "segment"
             elif isinstance(m, Classify):
                 return "classify"

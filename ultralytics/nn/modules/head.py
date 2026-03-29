@@ -20,7 +20,19 @@ from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "OBB", "Classify", "Detect", "Pose", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
+__all__ = (
+    "OBB",
+    "Classify",
+    "Detect",
+    "DetectSemAux26",
+    "Pose",
+    "RTDETRDecoder",
+    "Segment",
+    "Segment26",
+    "YOLOEDetect",
+    "YOLOESegment",
+    "v10Detect",
+)
 
 
 class Detect(nn.Module):
@@ -412,6 +424,36 @@ class Segment26(Segment):
         super().fuse()
         if hasattr(self.proto, "fuse"):
             self.proto.fuse()
+
+
+class DetectSemAux26(Segment26):
+    """YOLO26 detection head with auxiliary semantic segmentation supervision.
+
+    This head keeps standard detection outputs while exposing Proto26 semantic logits during training, enabling
+    semantically supervised multi-task training with a segmentation task pipeline.
+    """
+
+    def __init__(
+        self,
+        nc: int = 80,
+        sem_nc: int = 80,
+        sem_decoder_channels: int = 256,
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: tuple = (),
+    ):
+        """Initialize a YOLO26 detect+semantic-aux head.
+
+        Args:
+            nc (int): Number of detection classes.
+            sem_nc (int): Number of semantic segmentation classes.
+            sem_decoder_channels (int): Number of intermediate channels in the semantic decoder.
+            reg_max (int): Maximum number of DFL channels.
+            end2end (bool): Whether to use end-to-end NMS-free detection.
+            ch (tuple): Tuple of channel sizes from backbone feature maps.
+        """
+        super().__init__(nc=nc, nm=32, npr=sem_decoder_channels, reg_max=reg_max, end2end=end2end, ch=ch)
+        self.proto = Proto26(ch, self.npr, self.nm, sem_nc)  # semantic classes use sem_nc (not detection nc)
 
 
 class OBB(Detect):
