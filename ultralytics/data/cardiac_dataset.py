@@ -18,7 +18,8 @@ class CardiacDetectionDataset(YOLODataset):
     def __init__(self, *args, data: dict | None = None, mode: str = "train", **kwargs):
         """Initialize dataset and resolve semantic mask files for each image."""
         self.mode = mode
-        super().__init__(*args, data=data, task="detect", **kwargs)
+        kwargs.setdefault("task", "detect")
+        super().__init__(*args, data=data, **kwargs)
         self.sem_files = [self._sem_path_from_image(Path(p)) for p in self.im_files]
 
     def _sem_root(self) -> Path | None:

@@ -453,6 +453,9 @@ class DetectSemAux26(Detect):
             sem_logits = sem[1] if isinstance(sem, tuple) else None
             if isinstance(outputs, dict):
                 outputs["sem_logits"] = sem_logits
+                if self.end2end:
+                    outputs["one2many"]["sem_logits"] = sem_logits
+                    outputs["one2one"]["sem_logits"] = sem_logits.detach() if sem_logits is not None else None
             return outputs
         return outputs
 
