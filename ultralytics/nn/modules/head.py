@@ -20,7 +20,18 @@ from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "OBB", "Classify", "Detect", "Pose", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
+__all__ = (
+    "OBB",
+    "Classify",
+    "Detect",
+    "DetectSemAux26",
+    "Pose",
+    "RTDETRDecoder",
+    "Segment",
+    "YOLOEDetect",
+    "YOLOESegment",
+    "v10Detect",
+)
 
 
 class Detect(nn.Module):
@@ -412,6 +423,44 @@ class Segment26(Segment):
         super().fuse()
         if hasattr(self.proto, "fuse"):
             self.proto.fuse()
+
+
+class DetectSemAux26(Detect):
+    """YOLO26 Detect head with an auxiliary semantic decoder branch."""
+
+    def __init__(self, nc: int = 80, sem_nc: int = 5, sem_c: int = 256, reg_max=16, end2end=False, ch: tuple = ()):
+        """Initialize detection and auxiliary semantic branches.
+
+        Args:
+            nc (int): Number of detection classes.
+            sem_nc (int): Number of semantic classes for auxiliary segmentation.
+            sem_c (int): Intermediate channels used by the semantic decoder.
+            reg_max (int): Maximum number of DFL channels.
+            end2end (bool): Whether to use end-to-end NMS-free detection.
+            ch (tuple): Tuple of channel sizes from backbone feature maps.
+        """
+        super().__init__(nc=nc, reg_max=reg_max, end2end=end2end, ch=ch)
+        self.sem_nc = sem_nc
+        self.sem_c = sem_c
+        self.sem_proto = Proto26(ch=ch, c_=sem_c, c2=32, nc=sem_nc)
+
+    def forward(self, x: list[torch.Tensor]) -> tuple | torch.Tensor | dict[str, torch.Tensor]:
+        """Return detection outputs and, during training, auxiliary semantic logits."""
+        outputs = super().forward(x)
+        sem = self.sem_proto(x)  # Proto26 returns (proto, semseg) in training and proto in eval
+
+        if self.training:
+            sem_logits = sem[1] if isinstance(sem, tuple) else None
+            if isinstance(outputs, dict):
+                outputs["sem_logits"] = sem_logits
+            return outputs
+        return outputs
+
+    def fuse(self) -> None:
+        """Fuse detection layers and drop semantic decoder for inference optimization."""
+        super().fuse()
+        if hasattr(self.sem_proto, "fuse"):
+            self.sem_proto.fuse()
 
 
 class OBB(Detect):
