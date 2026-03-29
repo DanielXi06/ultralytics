@@ -496,8 +496,9 @@ class v8DetectSemAuxLoss(v8DetectionLoss):
             sem_loss = self.bcedice_loss(sem_logits, sem_one_hot).unsqueeze(0) * float(self.sem_loss_weight)
 
         batch_size = preds["boxes"].shape[0]
-        total_loss = det_loss + sem_loss * batch_size
-        loss_items = torch.cat((det_loss_items, sem_loss.detach()))
+        sem_loss = sem_loss * batch_size
+        total_loss = torch.cat((det_loss, sem_loss))
+        loss_items = torch.cat((det_loss_items, sem_loss.detach() / batch_size))
         return total_loss, loss_items
 
 
