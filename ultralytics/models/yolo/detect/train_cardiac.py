@@ -54,7 +54,6 @@ class CardiacDetectionTrainer(DetectionTrainer):
             stride=gs,
             pad=0.0 if mode == "train" else 0.5,
             prefix=f"{mode}: ",
-            task=self.args.task,
             classes=self.args.classes,
             data=self.data,
             fraction=self.args.fraction if mode == "train" else 1.0,
