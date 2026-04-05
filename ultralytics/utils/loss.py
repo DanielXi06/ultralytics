@@ -467,6 +467,16 @@ class v8DetectionLoss:
         batch_size = preds["boxes"].shape[0]
         loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
         return loss * batch_size, loss_detach
+    
+    def branch_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the per-branch loss used by end-to-end wrappers."""
+        return self.loss(preds, batch)
+
+    def shared_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return auxiliary losses shared across branches."""
+        empty = torch.zeros(0, device=self.device)
+        return empty, empty
+
 
 
 class v8DetectSemAuxLoss(v8DetectionLoss):
@@ -481,9 +491,12 @@ class v8DetectSemAuxLoss(v8DetectionLoss):
             self.sem_loss_weight = model.yaml.get("sem_loss_weight", 0.2) if hasattr(model, "yaml") else 0.2
         self.bcedice_loss = BCEDiceLoss(weight_bce=0.5, weight_dice=0.5)
 
-    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate combined detection and auxiliary semantic losses."""
-        det_loss, det_loss_items = super().loss(preds, batch)
+    def branch_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the detection-only branch loss used by end-to-end training."""
+        return super().loss(preds, batch)
+
+    def shared_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the semantic auxiliary loss shared across end-to-end branches."""
         sem_loss = torch.zeros(1, device=self.device)
         sem_logits = preds.get("sem_logits")
         sem_masks = batch.get("sem_masks")
@@ -495,10 +508,18 @@ class v8DetectSemAuxLoss(v8DetectionLoss):
             sem_one_hot = F.one_hot(sem_masks, num_classes=self.sem_nc).permute(0, 3, 1, 2).float()
             sem_loss = self.bcedice_loss(sem_logits, sem_one_hot).unsqueeze(0) * float(self.sem_loss_weight)
 
-        batch_size = preds["boxes"].shape[0]
-        total_loss = det_loss + sem_loss * batch_size
-        loss_items = torch.cat((det_loss_items, sem_loss.detach()))
-        return total_loss, loss_items
+        ref_preds = preds["one2many"] if "one2many" in preds else preds
+        batch_size = ref_preds["boxes"].shape[0]
+        return sem_loss * batch_size, sem_loss.detach()
+
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate combined detection and auxiliary semantic losses."""
+        det_loss, det_loss_items = self.branch_loss(preds, batch)
+        sem_loss, sem_loss_items = self.shared_loss(preds, batch)
+        return torch.cat((det_loss, sem_loss)), torch.cat((det_loss_items, sem_loss_items))
+
+
+
 
 
 class v8SegmentationLoss(v8DetectionLoss):
@@ -1198,9 +1219,17 @@ class E2ELoss:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         preds = self.one2many.parse_output(preds)
         one2many, one2one = preds["one2many"], preds["one2one"]
-        loss_one2many = self.one2many.loss(one2many, batch)
-        loss_one2one = self.one2one.loss(one2one, batch)
-        return loss_one2many[0] * self.o2m + loss_one2one[0] * self.o2o, loss_one2one[1]
+        loss_one2many = self.one2many.branch_loss(one2many, batch)
+        loss_one2one = self.one2one.branch_loss(one2one, batch)
+        loss = loss_one2many[0] * self.o2m + loss_one2one[0] * self.o2o
+        loss_items = loss_one2one[1]
+
+        # Some heads expose auxiliary predictions outside the one2many/one2one branch dicts.
+        shared_loss, shared_items = self.one2one.shared_loss(preds, batch)
+        if shared_loss.numel():
+            loss = torch.cat((loss, shared_loss))
+            loss_items = torch.cat((loss_items, shared_items))
+        return loss, loss_items
 
     def update(self) -> None:
         """Update the weights for one-to-many and one-to-one losses based on the decay schedule."""
