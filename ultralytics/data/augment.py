@@ -1263,6 +1263,7 @@ class RandomPerspective:
         img = labels["img"]
         cls = labels["cls"]
         instances = labels.pop("instances")
+        semantic = labels.get("semantic")
         # Make sure the coord formats are right
         instances.convert_bbox(format="xyxy")
         instances.denormalize(*img.shape[:2][::-1])
@@ -1272,6 +1273,11 @@ class RandomPerspective:
         # M is affine matrix
         # Scale for func:`box_candidates`
         img, M, scale = self.affine_transform(img, border)
+        if semantic is not None:
+            if self.perspective:
+                semantic = cv2.warpPerspective(semantic, M, dsize=self.size, flags=cv2.INTER_NEAREST, borderValue=0)
+            else:
+                semantic = cv2.warpAffine(semantic, M[:2], dsize=self.size, flags=cv2.INTER_NEAREST, borderValue=0)
 
         bboxes = self.apply_bboxes(instances.bboxes, M)
 
@@ -1296,6 +1302,8 @@ class RandomPerspective:
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["img"] = img
+        if semantic is not None:
+            labels["semantic"] = semantic
         labels["resized_shape"] = img.shape[:2]
         return labels
 
@@ -1485,6 +1493,7 @@ class RandomFlip:
             >>> flipped_labels = random_flip(labels)
         """
         img = labels["img"]
+        semantic = labels.get("semantic")
         instances = labels.pop("instances")
         instances.convert_bbox(format="xywh")
         h, w = img.shape[:2]
@@ -1494,15 +1503,21 @@ class RandomFlip:
         # WARNING: two separate if and calls to random.random() intentional for reproducibility with older versions
         if self.direction == "vertical" and random.random() < self.p:
             img = np.flipud(img)
+            if semantic is not None:
+                semantic = np.flipud(semantic)
             instances.flipud(h)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         if self.direction == "horizontal" and random.random() < self.p:
             img = np.fliplr(img)
+            if semantic is not None:
+                semantic = np.fliplr(semantic)
             instances.fliplr(w)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         labels["img"] = np.ascontiguousarray(img)
+        if semantic is not None:
+            labels["semantic"] = np.ascontiguousarray(semantic)
         labels["instances"] = instances
         return labels
 
@@ -1591,6 +1606,7 @@ class LetterBox:
         if labels is None:
             labels = {}
         img = labels.get("img") if image is None else image
+        semantic = labels.get("semantic")
         shape = img.shape[:2]  # current shape [height, width]
         new_shape = labels.pop("rect_shape", self.new_shape)
         if isinstance(new_shape, int):
@@ -1620,6 +1636,8 @@ class LetterBox:
             img = cv2.resize(img, new_unpad, interpolation=self.interpolation)
             if img.ndim == 2:
                 img = img[..., None]
+            if semantic is not None:
+                semantic = cv2.resize(semantic, new_unpad, interpolation=cv2.INTER_NEAREST)
 
         top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
         left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
@@ -1632,6 +1650,8 @@ class LetterBox:
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
+        if semantic is not None:
+            semantic = cv2.copyMakeBorder(semantic, top, bottom, left, right, cv2.BORDER_CONSTANT, value=0)
 
         if labels.get("ratio_pad"):
             labels["ratio_pad"] = (labels["ratio_pad"], (left, top))  # for evaluation
@@ -1639,6 +1659,8 @@ class LetterBox:
         if len(labels):
             labels = self._update_labels(labels, ratio, left, top)
             labels["img"] = img
+            if semantic is not None:
+                labels["semantic"] = semantic
             labels["resized_shape"] = new_shape
             return labels
         else:
@@ -2051,6 +2073,7 @@ class Format:
         h, w = img.shape[:2]
         cls = labels.pop("cls")
         instances = labels.pop("instances")
+        semantic = labels.pop("semantic", None)
         instances.convert_bbox(format=self.bbox_format)
         instances.denormalize(w, h)
         nl = len(instances)
@@ -2079,6 +2102,12 @@ class Format:
                 sem_masks = torch.zeros(img.shape[0] // self.mask_ratio, img.shape[1] // self.mask_ratio)
             labels["masks"] = masks
             labels["sem_masks"] = sem_masks.float()
+        if semantic is not None:
+            if semantic.ndim == 3 and semantic.shape[-1] == 1:
+                semantic = semantic[..., 0]
+            if semantic.shape != (h, w):
+                semantic = cv2.resize(semantic, (w, h), interpolation=cv2.INTER_NEAREST)
+            labels["sem_masks"] = torch.from_numpy(np.ascontiguousarray(semantic)).float()
         labels["img"] = self._format_img(img)
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
