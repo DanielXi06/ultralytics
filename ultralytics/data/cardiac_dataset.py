@@ -7,7 +7,6 @@ from typing import Any
 
 import cv2
 import numpy as np
-import torch
 
 from ultralytics.data.dataset import YOLODataset
 
@@ -54,11 +53,10 @@ class CardiacDetectionDataset(YOLODataset):
             return sem_path
         return None
 
-    def __getitem__(self, i: int) -> dict[str, Any]:
-        """Return regular detection sample plus semantic mask tensor `sem_masks`."""
-        sample = super().__getitem__(i)
-        h, w = sample["img"].shape[1:]
-        sem = np.zeros((h, w), dtype=np.float32)
+    def _load_semantic(self, i: int, hw: tuple[int, int]) -> np.ndarray:
+        """Load one semantic mask and align it with the pre-transform image size."""
+        h, w = hw
+        sem = np.zeros((h, w), dtype=np.uint8)
 
         sem_path = self.sem_files[i]
         if sem_path and sem_path.exists():
@@ -66,7 +64,11 @@ class CardiacDetectionDataset(YOLODataset):
             if sem_loaded is not None:
                 if sem_loaded.shape != (h, w):
                     sem_loaded = cv2.resize(sem_loaded, (w, h), interpolation=cv2.INTER_NEAREST)
-                sem = sem_loaded.astype(np.float32)
+                sem = sem_loaded.astype(np.uint8)
+        return sem
 
-        sample["sem_masks"] = torch.from_numpy(sem)
-        return sample
+    def get_image_and_label(self, index: int) -> dict[str, Any]:
+        """Return detection labels plus a semantic mask before any spatial transforms."""
+        label = super().get_image_and_label(index)
+        label["semantic"] = self._load_semantic(index, label["img"].shape[:2])
+        return label
