@@ -467,6 +467,16 @@ class v8DetectionLoss:
         batch_size = preds["boxes"].shape[0]
         loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
         return loss * batch_size, loss_detach
+    
+    def branch_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the per-branch loss used by end-to-end wrappers."""
+        return self.loss(preds, batch)
+
+    def shared_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return auxiliary losses shared across branches."""
+        empty = torch.zeros(0, device=self.device)
+        return empty, empty
+
 
     def branch_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the per-branch loss used by end-to-end wrappers."""
