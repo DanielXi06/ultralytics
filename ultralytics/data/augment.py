@@ -552,6 +552,26 @@ class Mosaic(BaseMixTransform):
             self._mosaic3(labels) if self.n == 3 else self._mosaic4(labels) if self.n == 4 else self._mosaic9(labels)
         )  # This code is modified for mosaic3 method.
 
+    @staticmethod
+    def _paste_semantic(dst: np.ndarray | None, src: np.ndarray | None, dst_box: tuple[int, int, int, int], src_box: tuple[int, int, int, int]) -> None:
+        """Paste one semantic mask tile into a mosaic canvas using image-space coordinates."""
+        if dst is None or src is None:
+            return
+        x1a, y1a, x2a, y2a = dst_box
+        x1b, y1b, x2b, y2b = src_box
+        dst_h, dst_w = dst.shape[:2]
+        src_h, src_w = src.shape[:2]
+
+        x1a, y1a = max(x1a, 0), max(y1a, 0)
+        x2a, y2a = min(x2a, dst_w), min(y2a, dst_h)
+        x1b, y1b = max(x1b, 0), max(y1b, 0)
+        x2b, y2b = min(x2b, src_w), min(y2b, src_h)
+
+        w = min(x2a - x1a, x2b - x1b)
+        h = min(y2a - y1a, y2b - y1b)
+        if w > 0 and h > 0:
+            dst[y1a : y1a + h, x1a : x1a + w] = src[y1b : y1b + h, x1b : x1b + w]
+
     def _mosaic3(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Create a 1x3 image mosaic by combining three images.
 
@@ -589,6 +609,11 @@ class Mosaic(BaseMixTransform):
             # Place img in img3
             if i == 0:  # center
                 img3 = np.full((s * 3, s * 3, img.shape[2]), 114, dtype=np.uint8)  # base image with 3 tiles
+                semantic3 = (
+                    np.zeros((s * 3, s * 3), dtype=labels_patch["semantic"].dtype)
+                    if labels_patch.get("semantic") is not None
+                    else None
+                )
                 h0, w0 = h, w
                 c = s, s, s + w, s + h  # xmin, ymin, xmax, ymax (base) coordinates
             elif i == 1:  # right
@@ -600,6 +625,12 @@ class Mosaic(BaseMixTransform):
             x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coordinates
 
             img3[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img3[ymin:ymax, xmin:xmax]
+            self._paste_semantic(
+                semantic3,
+                labels_patch.get("semantic"),
+                (x1, y1, x2, y2),
+                (x1 - padw, y1 - padh, x2 - padw, y2 - padh),
+            )
             # hp, wp = h, w  # height, width previous for next iteration
 
             # Labels assuming imgsz*2 mosaic size
@@ -608,6 +639,8 @@ class Mosaic(BaseMixTransform):
         final_labels = self._cat_labels(mosaic_labels)
 
         final_labels["img"] = img3[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
+        if semantic3 is not None:
+            final_labels["semantic"] = semantic3[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
         return final_labels
 
     def _mosaic4(self, labels: dict[str, Any]) -> dict[str, Any]:
@@ -646,6 +679,11 @@ class Mosaic(BaseMixTransform):
             # Place img in img4
             if i == 0:  # top left
                 img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                semantic4 = (
+                    np.zeros((s * 2, s * 2), dtype=labels_patch["semantic"].dtype)
+                    if labels_patch.get("semantic") is not None
+                    else None
+                )
                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
             elif i == 1:  # top right
@@ -659,6 +697,12 @@ class Mosaic(BaseMixTransform):
                 x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
 
             img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+            self._paste_semantic(
+                semantic4,
+                labels_patch.get("semantic"),
+                (x1a, y1a, x2a, y2a),
+                (x1b, y1b, x2b, y2b),
+            )
             padw = x1a - x1b
             padh = y1a - y1b
 
@@ -666,6 +710,8 @@ class Mosaic(BaseMixTransform):
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
         final_labels["img"] = img4
+        if semantic4 is not None:
+            final_labels["semantic"] = semantic4
         return final_labels
 
     def _mosaic9(self, labels: dict[str, Any]) -> dict[str, Any]:
@@ -704,6 +750,11 @@ class Mosaic(BaseMixTransform):
             # Place img in img9
             if i == 0:  # center
                 img9 = np.full((s * 3, s * 3, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                semantic9 = (
+                    np.zeros((s * 3, s * 3), dtype=labels_patch["semantic"].dtype)
+                    if labels_patch.get("semantic") is not None
+                    else None
+                )
                 h0, w0 = h, w
                 c = s, s, s + w, s + h  # xmin, ymin, xmax, ymax (base) coordinates
             elif i == 1:  # top
@@ -728,6 +779,12 @@ class Mosaic(BaseMixTransform):
 
             # Image
             img9[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img9[ymin:ymax, xmin:xmax]
+            self._paste_semantic(
+                semantic9,
+                labels_patch.get("semantic"),
+                (x1, y1, x2, y2),
+                (x1 - padw, y1 - padh, x2 - padw, y2 - padh),
+            )
             hp, wp = h, w  # height, width previous for next iteration
 
             # Labels assuming imgsz*2 mosaic size
@@ -736,6 +793,8 @@ class Mosaic(BaseMixTransform):
         final_labels = self._cat_labels(mosaic_labels)
 
         final_labels["img"] = img9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
+        if semantic9 is not None:
+            final_labels["semantic"] = semantic9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
         return final_labels
 
     @staticmethod
@@ -1263,6 +1322,7 @@ class RandomPerspective:
         img = labels["img"]
         cls = labels["cls"]
         instances = labels.pop("instances")
+        semantic = labels.get("semantic")
         # Make sure the coord formats are right
         instances.convert_bbox(format="xyxy")
         instances.denormalize(*img.shape[:2][::-1])
@@ -1272,6 +1332,11 @@ class RandomPerspective:
         # M is affine matrix
         # Scale for func:`box_candidates`
         img, M, scale = self.affine_transform(img, border)
+        if semantic is not None:
+            if self.perspective:
+                semantic = cv2.warpPerspective(semantic, M, dsize=self.size, flags=cv2.INTER_NEAREST, borderValue=0)
+            else:
+                semantic = cv2.warpAffine(semantic, M[:2], dsize=self.size, flags=cv2.INTER_NEAREST, borderValue=0)
 
         bboxes = self.apply_bboxes(instances.bboxes, M)
 
@@ -1296,6 +1361,8 @@ class RandomPerspective:
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["img"] = img
+        if semantic is not None:
+            labels["semantic"] = semantic
         labels["resized_shape"] = img.shape[:2]
         return labels
 
@@ -1485,6 +1552,7 @@ class RandomFlip:
             >>> flipped_labels = random_flip(labels)
         """
         img = labels["img"]
+        semantic = labels.get("semantic")
         instances = labels.pop("instances")
         instances.convert_bbox(format="xywh")
         h, w = img.shape[:2]
@@ -1494,15 +1562,21 @@ class RandomFlip:
         # WARNING: two separate if and calls to random.random() intentional for reproducibility with older versions
         if self.direction == "vertical" and random.random() < self.p:
             img = np.flipud(img)
+            if semantic is not None:
+                semantic = np.flipud(semantic)
             instances.flipud(h)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         if self.direction == "horizontal" and random.random() < self.p:
             img = np.fliplr(img)
+            if semantic is not None:
+                semantic = np.fliplr(semantic)
             instances.fliplr(w)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         labels["img"] = np.ascontiguousarray(img)
+        if semantic is not None:
+            labels["semantic"] = np.ascontiguousarray(semantic)
         labels["instances"] = instances
         return labels
 
@@ -1591,6 +1665,7 @@ class LetterBox:
         if labels is None:
             labels = {}
         img = labels.get("img") if image is None else image
+        semantic = labels.get("semantic")
         shape = img.shape[:2]  # current shape [height, width]
         new_shape = labels.pop("rect_shape", self.new_shape)
         if isinstance(new_shape, int):
@@ -1620,6 +1695,8 @@ class LetterBox:
             img = cv2.resize(img, new_unpad, interpolation=self.interpolation)
             if img.ndim == 2:
                 img = img[..., None]
+            if semantic is not None:
+                semantic = cv2.resize(semantic, new_unpad, interpolation=cv2.INTER_NEAREST)
 
         top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
         left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
@@ -1632,6 +1709,8 @@ class LetterBox:
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
+        if semantic is not None:
+            semantic = cv2.copyMakeBorder(semantic, top, bottom, left, right, cv2.BORDER_CONSTANT, value=0)
 
         if labels.get("ratio_pad"):
             labels["ratio_pad"] = (labels["ratio_pad"], (left, top))  # for evaluation
@@ -1639,6 +1718,8 @@ class LetterBox:
         if len(labels):
             labels = self._update_labels(labels, ratio, left, top)
             labels["img"] = img
+            if semantic is not None:
+                labels["semantic"] = semantic
             labels["resized_shape"] = new_shape
             return labels
         else:
@@ -2051,6 +2132,7 @@ class Format:
         h, w = img.shape[:2]
         cls = labels.pop("cls")
         instances = labels.pop("instances")
+        semantic = labels.pop("semantic", None)
         instances.convert_bbox(format=self.bbox_format)
         instances.denormalize(w, h)
         nl = len(instances)
@@ -2079,6 +2161,12 @@ class Format:
                 sem_masks = torch.zeros(img.shape[0] // self.mask_ratio, img.shape[1] // self.mask_ratio)
             labels["masks"] = masks
             labels["sem_masks"] = sem_masks.float()
+        if semantic is not None:
+            if semantic.ndim == 3 and semantic.shape[-1] == 1:
+                semantic = semantic[..., 0]
+            if semantic.shape != (h, w):
+                semantic = cv2.resize(semantic, (w, h), interpolation=cv2.INTER_NEAREST)
+            labels["sem_masks"] = torch.from_numpy(np.ascontiguousarray(semantic)).float()
         labels["img"] = self._format_img(img)
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
